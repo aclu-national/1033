@@ -1,0 +1,175 @@
+---
+title: "Charts for Article"
+author: "ACLU Analytics"
+date: "2/3/2021"
+output: html_document
+---
+
+```{r setup, include = F, echo = F, error = F, message = F, warning = F, results='hide'}
+knitr::opts_chunk$set(echo = F, error = F, message = F, warning = F, results='hide')
+
+library(tidyverse)
+library(janitor)
+library(readxl)
+library(kableExtra)
+library(lubridate)
+library(googlesheets4)
+library(magrittr)
+library(expss)
+library(here)
+
+#source(here::here("R/01-read-1033-data.R")) #only needs to be run once
+#source(here::here("R/02-identify-equipment-affected-by-EO13688.R"))
+source(here::here("R/04-collapse-transfers-by-time.R"))
+
+LESO <- readRDS(here::here("data/02-interim/LESO.Rds")) %>% 
+  filter(policy_change_ban != "pre1033")
+
+extrafont::loadfonts()
+theme_set(theme_minimal())
+theme_update(panel.grid.minor.x = element_blank(),
+          axis.ticks = element_blank(),
+          axis.line = element_line(color = "transparent"),
+          plot.title = element_text(size = 14, face = "bold"),
+          plot.title.position = "plot",
+          text = element_text(family = "GT America"))
+
+```
+
+# Number, value, or percent-of-total of militarized items by quarter
+
+```{r number-val-mil-by-month}
+# colored background option 
+
+x <- LESO_by_quarter %>% 
+  mutate(ship_date_quarter = as.Date(ship_date_quarter))
+
+ggplot() + 
+    geom_rect(aes(xmin = as.Date("2015-05-01"), xmax = as.Date("2017-07-01"), ymin = 0, ymax = 15000),
+            fill = "#a3dbe3", alpha = 0.5) +
+    geom_line(data = subset(x, ship_date_quarter >= "2014-10-01"), aes(x = ship_date_quarter, y = n), size = 1.2) +
+    geom_line(data = subset(x, ship_date_quarter <= "2014-10-01" & ship_date_quarter >= "2010-12-31"), aes(x = ship_date_quarter, y = n), linetype = "dashed", size = 0.8) +
+    scale_y_continuous(limits = c(0, 15000), label = scales::comma) +
+    scale_x_date(limits = c(as.Date("2010-12-31"), as.Date("2020-10-01")), date_breaks = "1 year", date_labels = "%Y") +
+    labs(x = '', y = '', title = "Overall Number of Items Transferred per Quarter\n") +
+    geom_text(aes(x = as.Date("2017-05-01"), y = 14000), label = "Reform in Effect", hjust = 1) +
+    theme_minimal() +
+    theme(
+          panel.grid = element_line(color = "white"),
+          panel.grid.minor.x = element_blank(),
+          axis.ticks = element_blank(),
+          axis.line = element_line(color = "transparent"),
+          plot.title = element_text(size = 14, face = "bold"),
+          plot.title.position = "plot",
+          plot.background = element_rect(fill = "#efecea")
+          ) 
+
+```
+
+```{r}
+# white option 
+x <- LESO_by_quarter %>% 
+  mutate(ship_date_quarter = as.Date(ship_date_quarter))
+
+ggplot() + 
+    geom_rect(aes(xmin = as.Date("2015-05-01"), xmax = as.Date("2017-07-01"), ymin = 0, ymax = 15000),
+            fill = "#efecea", alpha = 0.6) +
+    geom_line(data = subset(x, ship_date_quarter >= "2014-10-01"), aes(x = ship_date_quarter, y = n), size = 1.2) +
+    geom_line(data = subset(x, ship_date_quarter <= "2014-10-01" & ship_date_quarter >= "2011-01-01"), 
+              aes(x = ship_date_quarter, y = n), linetype = "dashed", size = 0.8) +
+    scale_y_continuous(limits = c(0, 15000), label = scales::comma) +
+    scale_x_date(limits = c(as.Date("2011-01-01"), as.Date("2020-10-01")), 
+                 date_breaks = "1 year", date_labels = "%Y") +
+    labs(x = '', y = '', title = "Overall Number of Items Transferred per Quarter\n") +
+    geom_text(aes(x = as.Date("2017-05-01"), y = 14000), label = "Reform in Effect", hjust = 1) 
+
+ggsave(plot = last_plot(), filename = "../output/items.png", width = 8, height = 5.33, units = "in", dpi = 300, bg = "white")
+
+```
+
+
+
+```{r}
+options(scipen = 999)
+ylab <- c(0, 100, 200, 300)
+ggplot() + 
+    geom_rect(aes(xmin = as.Date("2015-05-01"), xmax = as.Date("2017-07-01"), ymin = 0, ymax = 300000000),
+            fill = "#efecea", alpha = 0.6) +
+    geom_line(data = subset(x, ship_date_quarter >= "2014-10-01"), 
+              aes(x = ship_date_quarter, y = spend_per_unit), size = 1.2) +
+    geom_line(data = subset(x, ship_date_quarter <= "2014-10-01" & ship_date_quarter >= "2011-01-01"), 
+              aes(x = ship_date_quarter, y = spend_per_unit), linetype = "dashed", size = 0.8) +
+    scale_y_continuous(labels = paste0("$", ylab, "M")) +
+    scale_x_date(limits = c(as.Date("2011-01-01"), as.Date("2020-12-31")), date_breaks = "1 year", 
+                 date_labels = "%Y", ) +
+    labs(x = '', y = '', title = "Overall Value of Items Transferred per Quarter\n") +
+    geom_text(aes(x = as.Date("2017-05-01"), y = 280000000), label = "Reform in Effect", hjust = 1) 
+
+ggsave(plot = last_plot(), filename = "../output/value.png", width = 8, height = 5.33, units = "in", dpi = 300, bg = "white")
+
+```
+
+
+# Number of particular types of controlled equipment transferred quarterly
+
+## Rifles 
+```{r}
+z <- LESO_controlled_quarter %>% 
+  filter(ship_date_quarter>"2010-12-31") %>% 
+  mutate(ship_date_quarter = as.Date(ship_date_quarter))
+
+ggplot() + 
+    geom_rect(aes(xmin = as.Date("2015-05-01"), xmax = as.Date("2017-07-01"), ymin = 0, ymax = 10000),
+            fill = "#efecea", alpha = 0.6) +
+    geom_line(data = subset(z, ship_date_quarter >= "2014-10-01"), aes(x = ship_date_quarter, y = n_rifles), size = 1.2) +
+    geom_line(data = subset(z, ship_date_quarter <= "2014-10-01" & ship_date_quarter >= "2011-01-01"), 
+              aes(x = ship_date_quarter, y = n_rifles), linetype = "dashed", size = 0.8) +
+    scale_y_continuous(limits = c(0, 10000), label = scales::comma) +
+    scale_x_date(limits = c(as.Date("2011-01-01"), as.Date("2020-10-01")), 
+                 date_breaks = "1 year", date_labels = "%Y") +
+    labs(x = '', y = '', title = "Number of Rifles Transferred per Quarter\n") +
+    geom_text(aes(x = as.Date("2017-05-01"), y = 9200), label = "Reform in Effect", hjust = 1) 
+
+ggsave(plot = last_plot(), filename = "../output/rifles.png", width = 8, height = 5.33, units = "in", dpi = 300, bg = "white")
+
+```
+
+## Controlled Vehicles 
+
+```{r}
+
+ggplot() + 
+    geom_rect(aes(xmin = as.Date("2015-05-01"), xmax = as.Date("2017-07-01"), ymin = 0, ymax = 300),
+            fill = "#efecea", alpha = 0.6) +
+    geom_line(data = subset(z, ship_date_quarter >= "2014-10-01"), aes(x = ship_date_quarter, y = n_controlledvehicle), size = 1.2) +
+    geom_line(data = subset(z, ship_date_quarter <= "2014-10-01" & ship_date_quarter >= "2011-01-01"), 
+              aes(x = ship_date_quarter, y = n_controlledvehicle), linetype = "dashed", size = 0.8) +
+    scale_y_continuous(limits = c(0, 300), label = scales::comma) +
+    scale_x_date(limits = c(as.Date("2011-01-01"), as.Date("2020-10-01")), 
+                 date_breaks = "1 year", date_labels = "%Y") +
+    labs(x = '', y = '', title = "Number of Controlled Vehicles Transferred per Quarter\n") +
+    geom_text(aes(x = as.Date("2017-05-01"), y = 280), label = "Reform in Effect", hjust = 1) 
+
+ggsave(plot = last_plot(), filename = "../output/vehicles.png", width = 8, height = 5.33, units = "in", dpi = 300, bg = "white")
+
+```
+
+## Aircrafts 
+
+```{r}
+ggplot() + 
+    geom_rect(aes(xmin = as.Date("2015-05-01"), xmax = as.Date("2017-07-01"), ymin = 0, ymax = 30),
+            fill = "#efecea", alpha = 0.6) +
+    geom_line(data = subset(z, ship_date_quarter >= "2014-10-01"), aes(x = ship_date_quarter, y = n_aircraft), size = 1.2) +
+    geom_line(data = subset(z, ship_date_quarter <= "2014-10-01" & ship_date_quarter >= "2011-01-01"), 
+              aes(x = ship_date_quarter, y = n_aircraft), linetype = "dashed", size = 0.8) +
+    scale_y_continuous(limits = c(0, 30), label = scales::comma) +
+    scale_x_date(limits = c(as.Date("2011-01-01"), as.Date("2020-10-01")), 
+                 date_breaks = "1 year", date_labels = "%Y") +
+    labs(x = '', y = '', title = "Number of Aircraft Transferred per Quarter\n") +
+    geom_text(aes(x = as.Date("2017-05-01"), y = 28), label = "Reform in Effect", hjust = 1)
+
+
+ggsave(plot = last_plot(), filename = "../output/aircrafts.png", width = 8, height = 5.33, units = "in", dpi = 300, bg = "white")
+```
+

@@ -1,0 +1,163 @@
+---
+title: "1033 Budget Test Case Analysis"
+author: "ACLU Analytics"
+date: "3/31/2021"
+output: html_document
+---
+
+```{r setup, include = F, echo = F, error = F, message = F, warning = F, results='hide'}
+knitr::opts_chunk$set(echo = F, error = F, message = F, warning = F)
+
+library(tidyverse)
+library(magrittr)
+library(readxl)
+library(here)
+library(kableExtra)
+library(lubridate)
+library(scales)
+
+#source(here::here(01-read-1033-data.R))
+#source(here::here("R/02-identify-equipment-affected-by-E013688.R"))
+
+LESO <- readRDS(here::here("data/02-interim/LESO.Rds"))
+source(here::here("R/03-collapse-1033-by-station.R"))
+```
+<br>
+<br>
+
+A common argument in support of the 1033 program is that it saves law enforcement agencies (and by extension, taxpayers) money because it prevents them from having to purchase equipment that is instead donated to them for free. If such an effect existed, it would be most evident in law enforcement agencies that receive a large amount of 1033 transfers over a relatively short period of time.
+
+Therefore, to test this hypothesis, we narrow participating law enforcement agencies according to the following criteria: State or local police or sheriff offices that have received more than \$800,000 worth of equipment over a period of one year or less, with all transfers shipped 2012 or later. We limit to transfers sent after 2012 because budget information is rarely available before 2011 or so, and to conduct this analysis we need at least one point of budget data *before* the 1033 transfers were made. Narrowing the data in this way yields a list of 31 departments, for 19 of which we were able to find budget information.
+
+```{r}
+#Identify law enforcement agencies of interest
+test_case_leas <- LESO_by_station %>% 
+  filter(participation_length<365 & total_value_agg>800000 & transfer_date_first>"2012-01-01" & (lea_type == "sheriff" | lea_type == "police") & state!="PR" & state!="DC") %>% 
+  select(station_name_lea_clean, state, transfer_date_first, transfer_date_last, total_value_agg)
+
+#For each of the above stations, we manually gathered all available budget information since 2010, available here:
+df_lea_budgets <- read_excel(here::here("data/01-raw/1033 LEA Budgets.xlsx")) %>% 
+  rowwise() %>% 
+  mutate(avg_yearly_budget=mean(c(FY10, FY11, FY12, FY13, FY14, FY15, FY16, FY17, FY18, FY19, FY20, FY21), na.rm=TRUE)) %>% 
+  mutate(transfers_avgbudget_ratio=total_value_agg/avg_yearly_budget)
+```
+
+
+The below table summarizes our findings. For each law enforcement agency for which budget information is available, we summarize:
+
+1. The amount of 1033 equipment transferred within a year as a percentage of that year's total agency budget.
+2. The change in agency budget from the year prior to first receipt of 1033 equipment to the year of first receipt of 1033 equipment (Y-1 to Y0).
+3. The change in agency budget from the year of first receipt of 1033 equipment to the year following (Y0 to Y1).
+4. To accommodate any potential lag in the impact of 1033 equipment on agency budgets, we also include the change from the year following receipt of 1033 equipment to the year after that (Y1 to Y2).
+
+There are very few cases where the agency budget shows any decrease at all in the years surrounding receipt of 1033 equipment, and in all but one of those cases, the size of the decrease is dwarfed by the size of the 1033 transfers. For instance, the San Jacinto County Sheriff received 1033 transfers worth 41% of its yearly budget, but only saw a corresponding 7% decrease in spending.
+
+<br>
+<br>
+
+```{r}
+#budget table
+df_lea_budgets_tbl <- df_lea_budgets %>% 
+  filter(!str_detect(calculated_how, "NO BUDGET INFO AVAILABLE")) %>% 
+  rowwise() %>% 
+  mutate(transfers_pct_budget = case_when(
+      transfer_date_first >= "2011-10-01" & transfer_date_first < "2012-10-01" ~ total_value_agg/FY12,
+      transfer_date_first >= "2012-10-01" & transfer_date_first < "2013-10-01" ~ total_value_agg/FY13,
+      transfer_date_first >= "2013-10-01" & transfer_date_first < "2014-10-01" ~ total_value_agg/FY14,
+      transfer_date_first >= "2014-10-01" & transfer_date_first < "2015-10-01" ~ total_value_agg/FY15,
+      transfer_date_first >= "2015-10-01" & transfer_date_first < "2016-10-01" ~ total_value_agg/FY16,
+      transfer_date_first >= "2016-10-01" & transfer_date_first < "2017-10-01" ~ total_value_agg/FY17,
+      transfer_date_first >= "2017-10-01" & transfer_date_first < "2018-10-01" ~ total_value_agg/FY18,
+      transfer_date_first >= "2018-10-01" & transfer_date_first < "2019-10-01" ~ total_value_agg/FY19,
+      transfer_date_first >= "2019-10-01" & transfer_date_first < "2020-10-01" ~ total_value_agg/FY20,
+      transfer_date_first >= "2020-10-01" & transfer_date_first < "2021-10-01" ~ total_value_agg/FY21,
+      TRUE ~ NA_real_),
+    y0change = case_when(
+      transfer_date_first >= "2011-10-01" & transfer_date_first < "2012-10-01" ~ (FY12-FY11)/FY11,
+      transfer_date_first >= "2012-10-01" & transfer_date_first < "2013-10-01" ~ (FY13-FY12)/FY12,
+      transfer_date_first >= "2013-10-01" & transfer_date_first < "2014-10-01" ~ (FY14-FY13)/FY13,
+      transfer_date_first >= "2014-10-01" & transfer_date_first < "2015-10-01" ~ (FY15-FY14)/FY14,
+      transfer_date_first >= "2015-10-01" & transfer_date_first < "2016-10-01" ~ (FY16-FY15)/FY15,
+      transfer_date_first >= "2016-10-01" & transfer_date_first < "2017-10-01" ~ (FY17-FY16)/FY16,
+      transfer_date_first >= "2017-10-01" & transfer_date_first < "2018-10-01" ~ (FY18-FY17)/FY17,
+      transfer_date_first >= "2018-10-01" & transfer_date_first < "2019-10-01" ~ (FY19-FY18)/FY18,
+      transfer_date_first >= "2019-10-01" & transfer_date_first < "2020-10-01" ~ (FY20-FY19)/FY19,
+      transfer_date_first >= "2020-10-01" & transfer_date_first < "2021-10-01" ~ (FY21-FY20)/FY20,
+      TRUE ~ NA_real_),
+    y1change = case_when(
+      transfer_date_first >= "2011-10-01" & transfer_date_first < "2012-10-01" ~ (FY13-FY12)/FY12,
+      transfer_date_first >= "2012-10-01" & transfer_date_first < "2013-10-01" ~ (FY14-FY13)/FY13,
+      transfer_date_first >= "2013-10-01" & transfer_date_first < "2014-10-01" ~ (FY15-FY14)/FY14,
+      transfer_date_first >= "2014-10-01" & transfer_date_first < "2015-10-01" ~ (FY16-FY15)/FY15,
+      transfer_date_first >= "2015-10-01" & transfer_date_first < "2016-10-01" ~ (FY17-FY16)/FY16,
+      transfer_date_first >= "2016-10-01" & transfer_date_first < "2017-10-01" ~ (FY18-FY17)/FY17,
+      transfer_date_first >= "2017-10-01" & transfer_date_first < "2018-10-01" ~ (FY19-FY18)/FY18,
+      transfer_date_first >= "2018-10-01" & transfer_date_first < "2019-10-01" ~ (FY20-FY19)/FY19,
+      transfer_date_first >= "2019-10-01" & transfer_date_first < "2020-10-01" ~ (FY21-FY20)/FY20,
+      TRUE ~ NA_real_),
+    y2change = case_when(
+      transfer_date_first >= "2011-10-01" & transfer_date_first < "2012-10-01" ~ (FY14-FY13)/FY13,
+      transfer_date_first >= "2012-10-01" & transfer_date_first < "2013-10-01" ~ (FY15-FY14)/FY14,
+      transfer_date_first >= "2013-10-01" & transfer_date_first < "2014-10-01" ~ (FY16-FY15)/FY15,
+      transfer_date_first >= "2014-10-01" & transfer_date_first < "2015-10-01" ~ (FY17-FY16)/FY16,
+      transfer_date_first >= "2015-10-01" & transfer_date_first < "2016-10-01" ~ (FY18-FY17)/FY17,
+      transfer_date_first >= "2016-10-01" & transfer_date_first < "2017-10-01" ~ (FY19-FY18)/FY18,
+      transfer_date_first >= "2017-10-01" & transfer_date_first < "2018-10-01" ~ (FY20-FY19)/FY19,
+      transfer_date_first >= "2018-10-01" & transfer_date_first < "2019-10-01" ~ (FY21-FY20)/FY20,
+      TRUE ~ NA_real_))
+
+df_lea_budgets_tbl %>% 
+  select(state, station_name_lea_clean, transfer_date_first, transfer_date_last, total_value_agg, transfers_pct_budget, y0change, y1change, y2change) %>% 
+  mutate(total_value_agg = scales::dollar(total_value_agg),
+         across(c(transfers_pct_budget, y0change, y1change, y2change), ~ scales::percent(.)),
+         across(c(transfers_pct_budget, y0change, y1change, y2change), ~ replace_na(., " "))) %>% 
+  kable(col.names = c("State", "Station Name", "Date of First Transfer", "Date of Last Transfer", "Total Value Transferred", "Transfers % of Budget", "Y-1 to Y0", "Y0 to Y1", "Y1 to Y2")) %>% 
+  kable_styling() %>% 
+  scroll_box(height = "400px")
+  
+
+```
+<br>
+<br>
+
+We also present our findings graphically. The charts below plot year-on-year budgets for each department. A dot is placed above each line graph, representing the additional value provided by 1033 transfers.
+
+<br>
+<br>
+
+```{r, out.width = "100%"}
+#Plot budget change and 1033 transfer value
+df_lea_budgets_tidy <- df_lea_budgets %>% 
+  pivot_longer(FY10:FY21, names_to = "FY", values_to = "budget") %>%
+  #convert the fiscal year label to the last date of the fiscal year
+  mutate(FY_end = (as.Date(str_replace_all(FY, "FY", "09-30-20"), format="%m-%d-%Y"))) %>% 
+  mutate(total_value_adjusted = ifelse((transfer_date_first <= FY_end & transfer_date_first >= ymd(FY_end)-years(1)), budget+total_value_agg, 0)) %>% 
+  naniar::replace_with_na(replace = list(total_value_adjusted=0)) %>% 
+  #filter out the nas for plotting purposes
+  filter(!is.na(avg_yearly_budget))
+
+df_lea_budgets_tidy %>% 
+  filter(avg_yearly_budget < 10000000) %>% 
+  ggplot()+
+  geom_line(aes(FY_end, budget, group=station_name_lea_clean, color=station_name_lea_clean)) + 
+  geom_point(aes(as.Date(transfer_date_first), total_value_adjusted, color=station_name_lea_clean))+
+  ylim(0, 10000000) +
+  facet_wrap(~station_name_lea_clean)
+```
+
+```{r, out.width="50%"}
+df_lea_budgets_tidy %>% 
+  filter(avg_yearly_budget >= 10000000 & avg_yearly_budget < 25000000) %>% 
+  ggplot()+
+  geom_line(aes(FY_end, budget, group=station_name_lea_clean, color=station_name_lea_clean))+
+  geom_point(aes(as.Date(transfer_date_first), total_value_adjusted, color=station_name_lea_clean))+
+  facet_wrap(~station_name_lea_clean)
+
+df_lea_budgets_tidy %>% 
+  filter(avg_yearly_budget >= 30000000 ) %>% 
+  ggplot()+
+  geom_line(aes(FY_end, budget, group=station_name_lea_clean, color=station_name_lea_clean))+
+  geom_point(aes(as.Date(transfer_date_first), total_value_adjusted, color=station_name_lea_clean))+
+  facet_wrap(~station_name_lea_clean)
+
+```

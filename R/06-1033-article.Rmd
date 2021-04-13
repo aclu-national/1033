@@ -1,0 +1,326 @@
+---
+title: "1033 Article"
+author: "ACLU Analytics"
+date: "12/21/2020"
+output: html_document
+---
+
+```{r setup, include = F, echo = T, error = F, message = F, warning = F, results='hide'}
+knitr::opts_chunk$set(echo = T, error = F, message = F, warning = F)
+
+library(readxl)
+library(tidyverse)
+library(janitor)
+library(lubridate)
+library(magrittr)
+library(kableExtra)
+library(renv)
+
+# source(here::here("R/01-read-1033-data.R"))
+# source(here::here("R/02-identifying-equipment-affected-by-E013688.R"))
+
+LESO <- readRDS(here::here("data/02-interim/LESO.Rds")) %>%
+  filter(policy_change_ban != "pre1033") #filter out transfers made during 1033's precursor program "1208"
+LESO_now <- readRDS(here::here("data/02-interim/LESO_now.Rds"))
+LESO_04072015 <- read_rds(here::here("data/02-interim/LESO_04072015.Rds"))
+LESO_07142015 <- read_rds(here::here("data/02-interim/LESO_07142015.Rds"))
+LESO_03202016 <- read_rds(here::here("data/02-interim/LESO_03202016.Rds"))
+LESO_06302017 <- read_rds(here::here("data/02-interim/LESO_06302017.Rds"))
+
+source(here::here("R/03-collapse-1033-by-station.R"))
+source(here::here("R/04-collapse-transfers-by-time.R"))
+
+```
+
+```{r}
+#Store R and package version info for reproducibility
+# renv::init()
+# renv::snapshot()
+
+#Call the below to restore the package versions initially used in this project
+#renv::restore()
+```
+
+This markdown produces the facts and figures referenced in the ACLU's April, 2021 article on the DoD's 1033 program. Generally, each data insight is presented here in the order it appears in our 1033 article. 
+
+### Basic Figures
+
+The 1033 program, nicknamed for the section of the 1997 NDAA that created it, allows for surplus military equipment to be transferred from the DoD to local, state, tribal, and federal law enforcement agencies. The program is administered by the Law Enforcement Supply Office (LESO) within the Defense Logistics Agency (DLA). Starting in 2014 and becoming more formal and regular in 2017, LESO has released quarterly updates of all controlled equipment transferred through 1033 and currently held by participating law enforcement agencies (LEAs). Some transfers pre-date the 1033 program itself, having been transferred during 1033's precursor program, 1208. At the same time, the data is incomplete before 2014, and we only have a record of around half of all 1033 equipment. The below figures summarize certain aspects of the available data. For more information about the methodology used to create a combined dataset of 1033 transfers, see the README in this Github repository.
+
+```{r}
+#Total number of law enforcement agencies having received documented 1033 transfers
+n_distinct(LESO$station_id)
+
+#Average yearly total value of transfers since 2011, # of agencies that have received 1033 transfers since 2011, # of states or territories having received transfers since 2011
+LESO %>%
+  filter(ship_date_year >= "2011-01-01") %>%
+  summarise(`Yearly Mean Value` = sum(total_value)/n_distinct(ship_date_year),
+            `Participating Agencies` = n_distinct(station_id),
+            `States and Territories with Participating Agencies` = n_distinct(state)) %>%
+  kable(caption = "1033 Since 2011: Summary Stats") %>%
+  kable_styling()
+
+#Number of military rifles distributed from 2011 to 2014 and number of stations receiving those rifles
+LESO %>%
+  filter(ship_date>="2011-01-01" & ship_date<="2014-12-31" & is_rifle) %>%
+  summarise(`Agencies Receiving Rifles` = n_distinct(station_id),
+            `Number of Rifles Transferred` = sum(quantity)) %>% 
+  kable(caption = "Rifles Transferred 2011 to 2014") %>% 
+  kable_styling()
+
+```
+
+### Evaluating Transfers during EO13688
+
+We examined the data for evidence of effects from Barack Obama's 2015 Executive Order 13688. Further details are available in the article, but this executive order convened a working group which then issued recommendations resulting in certain changes to the program. The most salient resulting changes banned and recalled a short list of items and instituted new restrictions on transferring a slightly longer list of equipment.
+
+#### Total Transfers Made During EO13688
+
+This code sums total transfers made during the period of EO13688, by total dollar value and by number of individual items.
+
+Methdological notes:
+
+* The EO's provisions restricting equipment took effect later than the provisions banning equipment, so I use the dates of the former to generate a more conservative estimate of total equipment transferred during the EO.
+* Counts of total items can only give a rough sense of the scale of the program because item units vary widely, from "each" to "yards" or "boxes," etc.
+
+```{r}
+LESO %>%
+  filter(policy_change_controlled=="obama_reforms" & not_demilA) %>%
+  summarise(`Value Transferred` = sum(total_value),
+            `Quantity of Items Transferred` = sum(quantity)) %>%
+  kable(caption = "Summary of Transfers Made During EO13688") %>%
+  kable_styling()
+```
+
+#### Banned Equipment
+
+Banned equipment can be comprehensively identified using a spreadsheet of NSNs, or NATO/National Stock Numbers, provided by the DLA. See the README for more information.
+
+Of the equipment in circulation at the time of the EO13688 ban, only 0.5% of items were banned, representing 1.6% of the total dollar value in circulation at the time. 
+
+```{r pct_banned}
+LESO_04072015 %>% 
+  mutate(banned = !is.na(banned_type)) %>% 
+  group_by(banned) %>% 
+  dplyr::summarize(n = sum(quantity),
+                   val = sum(total_value)) %>% 
+  mutate(pct_n = n/sum(LESO_04072015$quantity),
+         pct_val = val/sum(LESO_04072015$total_value)) %>% 
+  kable(col.names = c("Banned", "# of Items", "$ Value of Items", "Percent of Quantity", "Percent of Value")) %>% 
+  kable_styling()
+```
+
+While some militarized vehicles were banned and recalled by EO13688, many other very similar vehicles were left in circulation. 126 tracked, armored, personnel carriers were recalled, but at the time of the ban there had already been around 1200 transfers of other kinds of militarized vehicles that weren't touched by the ban. And during the EO 13688 period, another almost 400 militarized vehicles were transferred.
+
+```{r armored-vehicles}
+#Extract the NSNs of banned vehicles from the DLA-provided list
+banned_mil_vehicle_nsns <- LESO %>% filter(banned_type=="tracked armored") %>% pull(nsn) %>% unique() 
+
+#Count the total number of militarized vehicles in circulation at the time of the ban
+#The 04/07/2015 inventory update is the last update before the reforms began to take effect
+LESO_04072015 %>% 
+  filter(is_mil_vehicle) %>% 
+  pull(quantity) %>% 
+  sum()
+
+#Count how many (non-banned) militarized vehicles were transferred during the period of the executive order
+LESO %>% 
+  filter(is_mil_vehicle & (!nsn %in% banned_mil_vehicle_nsns) & policy_change_ban=="obama_reforms") %>% 
+  pull(quantity) %>% 
+  sum()
+
+```
+
+There were only four types of equipment banned by EO13688 that were also available through the 1033 program. The other types of banned items weren't being transferred through 1033 anyways. The below table breaks down transfers of banned equipment by time period: 
+
+```{r}
+LESO %>% 
+  filter(!is.na(banned_type)) %>% 
+  group_by(banned_type, policy_change_ban) %>%
+  summarize(n = sum(quantity, na.rm=T)) %>%
+  pivot_wider(names_from = policy_change_ban, values_from = n) %>%
+  select(banned_type, `1033a`, obama_reforms, `1033b`) %>% 
+  kable(col.names = c("Type of Banned Equipment", "Pre-EO13688", "EO13688", "Post-EO13688")) %>% 
+  kable_styling()
+```
+
+412 camo uniforms (whose NSNs are listed as banned) were transferred before EO13688 but don't appear in the list of recalled items. To mitigate, we confirmed that the inventories before and after the ban went into effect were indeed 1) in circulation at the time of the ban and 2) not recalled when other banned equipment was recalled. The EO13688 ban went into effect 05/2015;  most of the banned camoflauge uniforms appear in the inventory immediately before and both inventories after that date.
+
+```{r}
+LESO_04072015 %>% filter(banned_type=="camoflauge") %>% pull(quantity) %>% sum()
+LESO_07142015 %>% filter(banned_type=="camoflauge") %>% pull(quantity) %>% sum()
+LESO_03202016 %>% filter(banned_type=="camoflauge") %>% pull(quantity) %>% sum()
+```
+
+Less than half a percent of equipment in circulation at the time was banned by EO13688, but even fewer items were actually recalled. At the time the ban went into effect, at least 1,544,139 1033 transfers were in circulation. The total number of recalled items (126+1623+138, per LESO's [table of recalled items](https://www.dla.mil/Portals/104/Documents/DispositionServices/LESO/DISP_Executive%20Order%2013688%20Recalled%20Property_06202018.pdf?ver=2018-06-20-130559-403)) amounts to a tenth of a percent of items in circulation at the time of the recall.
+
+
+```{r pct-items-effected}
+(126+1623+138)/(LESO_04072015 %>% pull(quantity) %>% sum())
+```
+
+#### Restricted Equipment
+
+The EO didn't require jurisdictions to demonstrate need for restricted equipment beyond stating which kinds of situations would hypothetically warrant use (active shooter, etc). This has resulted in a first-come-first-serve system throughout the history of 1033, which itself results in nonsensical transfers--heavily militarized vehicles sent to counties with tiny populations, for instance.
+
+This table highlights transfers sent to sheriffs serving counties with total populations of less than 5,000 people.
+
+```{r}
+list_small_towns <- LESO_by_station_census_county %>% filter(total_pop<5000) %>% select(station_id, loc_name) %>% unique()
+df_small_towns <- left_join(list_small_towns, LESO, by=c("station_name_lea_clean", "loc_name"="location_name", "station_id"))
+
+df_small_towns %>% 
+  filter(policy_change_controlled=="obama_reforms" & demil_code!="A") %>% 
+  group_by(state, station_name_lea_clean, item_name) %>% 
+  summarize(n = n()) %>% 
+  ungroup() %>% 
+  mutate(items_n = paste(item_name, n, sep = "-"),
+         .keep = "unused") %>% 
+  group_by(state, station_name_lea_clean) %>% 
+  summarize(Equipment = toString(items_n, sep = ", ")) %>% 
+  kable(col.names = c("State", "Station Name", "Equipment"), caption = "Transfers sent to sheriffs serving counties of less than 5000 people.") %>% 
+  kable_styling() %>% 
+  scroll_box(height = "400px", width = "100%")
+  
+```
+
+The below identifies sheriffs serving counties of fewer than 10,000 people that have received militarized vehicles through 1033. 
+```{r}
+#Number of vehicles transferred to county sheriffs serving fewer than 10,000 people
+LESO_by_station_census_county %>% 
+  filter(total_pop<10000) %>% 
+  pull(n_mil_vehicle) %>% 
+  sum()
+
+#Identify the specific sheriff's offices receiving these vehicles
+LESO_by_station_census_county %>% 
+  filter(total_pop<10000 & n_mil_vehicle>0 & !is.na(n_mil_vehicle)) %>% 
+  select(state, station_name_lea_clean, n_mil_vehicle, total_pop) %>% 
+  kable(col.names = c("State", "Station Name", "# of Militarized Vehicles", "Total Population")) %>% 
+  kable_styling() %>% 
+  scroll_box(height = "350px")
+
+
+### TEMP -- for sophie
+sbcountyfile <- read_excel("~/Downloads/counties.xlsx", col_names = F) %>% 
+  clean_names() %>% 
+  mutate(county_merge = str_to_upper(x1))
+
+counties_to_plot <- LESO_by_station_census_county %>% 
+  filter(total_pop<10000 & n_mil_vehicle>0 & !is.na(n_mil_vehicle)) %>% 
+  select(station_name_lea_clean, n_mil_vehicle, total_pop, county_state) %>% 
+  mutate(county_merge = county_state %>% 
+           str_remove(" COUNTY") %>% 
+           str_squish()) %>% 
+  left_join(sbcountyfile, by = "county_merge")
+
+write_csv(counties_to_plot, here::here("data/02-interim/counties_to_plot.csv"))
+
+```
+
+Transfers made after high profile moments of police brutality highlight the lack of accountability characterizing the program. The below code identifies equipment transferred after law enforcement agencies perpetuated high-profile killings. In Baton Rouge, Alton Sterling was killed on 7/5/2016. In New York, Akai Gurley and Eric Garner were both killed by NYPD in 2014. 
+
+```{r transfers-after-brutality}
+LESO %>% filter(station_id=="LA_BATON ROUGE POLICE DEPARTMENT" & ship_date>"2016-07-05") %>% select(item_name, quantity) %>% 
+  kable(col.names = c("Item Name", "Quantity")) %>% kable_styling()
+LESO %>% filter(station_id=="NY_NEW YORK CITY POLICE DEPARTMENT" & ship_date>"2014-11-20") %>% group_by(item_name) %>% summarize(quantity = sum(quantity)) %>% 
+  kable(col.names = c("Item Name", "Quantity")) %>% kable_styling()
+```
+
+### Basic Figures, Continued
+
+Shortly before EO13688 was ended, the amount of equipment in categories of interest held by participating law enforcement agencies was comparable to levels tday.
+```{r}
+#Count rifles and militarized vehicles in circulation at that time
+#The repeal was Aug 28, 2017; 2017-06-30 update is the latest before the repeal
+LESO_06302017 %>% 
+  bind_rows(LESO_now, .id = "Year") %>% 
+  mutate(Year = case_when(Year=="1" ~ "06-30-2017",Year == "2" ~ "12-31-2020")) %>% 
+  mutate(Equipment = case_when(
+    is_rifle ~ "Rifles",
+    is_mil_vehicle ~ "Militarized Vehicles",
+    is_aircraft ~ "Military Aircraft",
+    str_detect(item_name, "UNMANNED VEHICLE,GROUND") ~ "Unmanned Ground Vehicle",
+    TRUE ~ NA_character_
+  )) %>% 
+  filter(!is.na(Equipment)) %>% 
+  group_by(Equipment, Year) %>% 
+  summarize(N = n()) %>% 
+  pivot_wider(names_from = Year, values_from = N) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Other miscellaneous equipment in circulation today include an inert rocket launcher 
+```{r}
+#Identify rockets
+LESO_now %>% 
+  ungroup() %>% 
+  filter(item_name=="DESC=INERT ROCKET LAUNCHER"|
+                      str_detect(item_name, "MACHINE GUN")|
+                      banned_type=="bayonet") %>% 
+  group_by(item_name) %>% 
+  summarize(Quantity = sum(quantity)) %>% 
+  kable(col.names=(c("Item Name", "Quantity"))) %>% 
+  kable_styling()
+
+```
+
+Unfortunately, 1033 transfers are present even with our K-12 school districts and universities.
+```{r schools}
+#Sum the monetary value of all transfers to currently held by law enforcement agencies affiliated with educational institutions
+LESO_now %>% 
+  filter((is_higher_ed | is_k_12) & is_militarized) %>% 
+  pull(total_value) %>% 
+  sum()
+
+#Identify some specific pieces of militarized equipment currently held by these education-affiliated law enforcement agencies
+LESO_now %>% 
+  filter((is_k_12 | is_higher_ed) & is_militarized) %>% 
+  filter(str_detect(item_name, "FIRING DEVICE|VEHICLE|PISTOL|RIFLE|SHOTGUN|TRUCK") & !str_detect(item_name, "COVERALLS|HOLSTER|GRIP|PACKBOT|CONVERSION")) %>% 
+  mutate(ed_type = case_when(is_k_12 ~ "K-12", is_higher_ed ~ "Higher Ed")) %>% 
+  select(ed_type, station_id, item_name, ship_date) %>% 
+  group_by(ed_type, item_name) %>% 
+  dplyr::summarize(n = n()) %>% 
+  kable(col.names = c("Edu Type", "Item Name", "Quantity")) %>% 
+  kable_styling() %>% 
+  scroll_box(height = "350px")
+
+#Count the number of higher educational institutions holding the aforementioned equipment
+LESO_now %>% 
+  filter(is_higher_ed & is_militarized) %>% 
+  filter(str_detect(item_name, "FIRING DEVICE|VEHICLE|PISTOL|RIFLE|SHOTGUN|TRUCK") & !str_detect(item_name, "COVERALLS|HOLSTER|GRIP|PACKBOT|CONVERSION")) %>% 
+  pull(station_id) %>% 
+  n_distinct()
+
+#Count the number of k-12 law enforcement with assault rifles transferred through 1033
+LESO_now %>% 
+  filter(is_k_12 & is_rifle) %>% 
+  pull(station_id) %>% 
+  n_distinct()
+
+#Identify the specific K-12 schools LEA holding a mine resistant vehicle
+LESO_now %>% 
+  filter(is_k_12 & item_name=="MINE RESISTANT VEHICLE") %>% 
+  pull(station_id, ship_date)
+
+```
+
+During the June, 2020 protests in Austin, Texas, police critically injured a 20-year-old Black man protesting using “less-lethal” weapons. At the time, they had in their possession 5 “less-lethal” firing devices transferred through 1033. 
+
+```{r protest-related-equipment}
+LESO_now %>% 
+  filter(protest_use & station_name_lea_clean=="AUSTIN POLICE DEPARTMENT") %>% 
+  group_by(item_name) %>% 
+  summarize(N = sum(quantity)) %>% 
+  kable(col.names = c("Item Name", "Quantity")) %>% 
+  kable_styling()
+```
+
+
+See 07-final-charts.Rmd for code producing the graphs included in the article.
+
+
+
+
+
