@@ -34,14 +34,6 @@ source(here::here("R/04-collapse-transfers-by-time.R"))
 
 ```
 
-```{r}
-#Store R and package version info for reproducibility
-renv::init()
-# renv::snapshot()
-
-#Call the below to restore the package versions initially used in this project
-#renv::restore()
-```
 
 This markdown produces the facts and figures referenced in the ACLU's April, 2021 article on the DoD's 1033 program. Generally, each data insight is presented here in the order it appears in our 1033 article. 
 
