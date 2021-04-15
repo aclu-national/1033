@@ -15,7 +15,9 @@ library(lubridate)
 library(magrittr)
 library(kableExtra)
 library(renv)
+```
 
+```{r}
 # source(here::here("R/01-read-1033-data.R"))
 # source(here::here("R/02-identifying-equipment-affected-by-E013688.R"))
 
@@ -34,7 +36,7 @@ source(here::here("R/04-collapse-transfers-by-time.R"))
 
 ```{r}
 #Store R and package version info for reproducibility
-# renv::init()
+renv::init()
 # renv::snapshot()
 
 #Call the below to restore the package versions initially used in this project
