@@ -12,6 +12,11 @@ library(magrittr)
 
 #This script is for reading in, combining, and processing the quarterly updates of 1033 equipment currently in circulation ("inventory" files).
 
+#Create a folder to store the files generated below
+if(!dir.exists(here::here("data/02-interim"))) {
+  dir.create(here::here("data/02-interim"))
+}
+
 #A function that cleans and standardizes the data and adds new useful variables
 process_LESO_data <- function(LESO){
 
